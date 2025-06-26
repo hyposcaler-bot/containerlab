@@ -6,6 +6,7 @@ package utils
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -23,6 +24,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/steiler/acls"
 
 	"github.com/charmbracelet/log"
@@ -31,6 +34,7 @@ import (
 var (
 	errNonRegularFile = errors.New("non-regular file")
 	errHTTPFetch      = errors.New("failed to fetch http(s) resource")
+	errS3Fetch        = errors.New("failed to fetch s3 resource")
 )
 
 // FileExists returns true if a file referenced by filename exists & accessible.
@@ -61,7 +65,7 @@ func DirExists(filename string) bool {
 // mode is the desired target file permissions, e.g. "0644".
 func CopyFile(src, dst string, mode os.FileMode) (err error) {
 	var sfi os.FileInfo
-	if !IsHttpURL(src, false) {
+	if !IsHttpURL(src, false) && !IsS3URL(src) {
 		sfi, err = os.Stat(src)
 		if err != nil {
 			return err
@@ -129,15 +133,42 @@ func IsHttpURL(s string, allowSchemaless bool) bool {
 	return err == nil && u.Host != ""
 }
 
+// IsS3URL checks if the URL is an S3 URL (s3://bucket/key format).
+func IsS3URL(s string) bool {
+	return strings.HasPrefix(s, "s3://")
+}
+
+// ParseS3URL parses an S3 URL and returns the bucket and key.
+func ParseS3URL(s3URL string) (bucket, key string, err error) {
+	if !IsS3URL(s3URL) {
+		return "", "", fmt.Errorf("not an S3 URL: %s", s3URL)
+	}
+
+	u, err := url.Parse(s3URL)
+	if err != nil {
+		return "", "", err
+	}
+
+	bucket = u.Host
+	key = strings.TrimPrefix(u.Path, "/")
+
+	if bucket == "" || key == "" {
+		return "", "", fmt.Errorf("invalid S3 URL format: %s", s3URL)
+	}
+
+	return bucket, key, nil
+}
+
 // CopyFileContents copies the contents of the file named src to the file named
 // by dst. The file will be created if it does not already exist. If the
 // destination file exists, all it's contents will be replaced by the contents
 // of the source file.
-// src can be an http(s) URL as well.
+// src can be an http(s) URL or an S3 URL.
 func CopyFileContents(src, dst string, mode os.FileMode) (err error) {
 	var in io.ReadCloser
 
-	if IsHttpURL(src, false) {
+	switch {
+	case IsHttpURL(src, false):
 		client := NewHTTPClient()
 
 		// download using client
@@ -147,7 +178,34 @@ func CopyFileContents(src, dst string, mode os.FileMode) (err error) {
 		}
 
 		in = resp.Body
-	} else {
+
+	case IsS3URL(src):
+		bucket, key, err := ParseS3URL(src)
+		if err != nil {
+			return err
+		}
+
+		// Load AWS config
+		cfg, err := config.LoadDefaultConfig(context.TODO())
+		if err != nil {
+			return fmt.Errorf("failed to load AWS config: %w", err)
+		}
+
+		// Create S3 client
+		client := s3.NewFromConfig(cfg)
+
+		// Get object from S3
+		result, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
+			Bucket: &bucket,
+			Key:    &key,
+		})
+		if err != nil {
+			return fmt.Errorf("%w: %s: %v", errS3Fetch, src, err)
+		}
+
+		in = result.Body
+
+	default:
 		in, err = os.Open(src)
 		if err != nil {
 			return err
