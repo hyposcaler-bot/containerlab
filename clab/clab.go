@@ -297,6 +297,20 @@ func (c *CLab) ProcessTopoPath(path string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+	// if the path is a GCS URL, download the file and store it in the tmp dir
+	case utils.IsGCSURL(path):
+		log.Debugf("interpreting topo %q as GCS URL", path)
+		file, err = downloadTopoFile(path, c.TopoPaths.ClabTmpDir())
+		if err != nil {
+			return "", err
+		}
+	// if the path is an Azure Blob URL, download the file and store it in the tmp dir
+	case utils.IsAzureBlobURL(path):
+		log.Debugf("interpreting topo %q as Azure Blob URL", path)
+		file, err = downloadTopoFile(path, c.TopoPaths.ClabTmpDir())
+		if err != nil {
+			return "", err
+		}
 
 	case path == "":
 		return "", fmt.Errorf("provide a path to the clab topology file")

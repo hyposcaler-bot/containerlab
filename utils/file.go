@@ -26,6 +26,8 @@ import (
 
 	"github.com/steiler/acls"
 	"gocloud.dev/blob"
+	_ "gocloud.dev/blob/azureblob"
+	_ "gocloud.dev/blob/gcsblob"
 	_ "gocloud.dev/blob/s3blob"
 
 	"github.com/charmbracelet/log"
@@ -35,6 +37,8 @@ var (
 	errNonRegularFile = errors.New("non-regular file")
 	errHTTPFetch      = errors.New("failed to fetch http(s) resource")
 	errS3Fetch        = errors.New("failed to fetch s3 resource")
+	errGCSFetch       = errors.New("failed to fetch gcs resource")
+	errAzureFetch     = errors.New("failed to fetch azure blob resource")
 )
 
 // FileExists returns true if a file referenced by filename exists & accessible.
@@ -65,7 +69,7 @@ func DirExists(filename string) bool {
 // mode is the desired target file permissions, e.g. "0644".
 func CopyFile(src, dst string, mode os.FileMode) (err error) {
 	var sfi os.FileInfo
-	if !IsHttpURL(src, false) && !IsS3URL(src) {
+	if !IsHttpURL(src, false) && !IsS3URL(src) && !IsGCSURL(src) && !IsAzureBlobURL(src) {
 		sfi, err = os.Stat(src)
 		if err != nil {
 			return err
@@ -138,6 +142,16 @@ func IsS3URL(s string) bool {
 	return strings.HasPrefix(s, "s3://")
 }
 
+// IsGCSURL checks if the URL is a GCS URL (gs://bucket/object format).
+func IsGCSURL(s string) bool {
+	return strings.HasPrefix(s, "gs://")
+}
+
+// IsAzureBlobURL checks if the URL is an Azure Blob URL (azblob://container/blob format).
+func IsAzureBlobURL(s string) bool {
+	return strings.HasPrefix(s, "azblob://")
+}
+
 // ParseS3URL parses an S3 URL and returns the bucket and key.
 func ParseS3URL(s3URL string) (bucket, key string, err error) {
 	if !IsS3URL(s3URL) {
@@ -159,11 +173,53 @@ func ParseS3URL(s3URL string) (bucket, key string, err error) {
 	return bucket, key, nil
 }
 
+// ParseGCSURL parses a GCS URL and returns the bucket and object path.
+func ParseGCSURL(gcsURL string) (bucket, object string, err error) {
+	if !IsGCSURL(gcsURL) {
+		return "", "", fmt.Errorf("not a GCS URL: %s", gcsURL)
+	}
+
+	u, err := url.Parse(gcsURL)
+	if err != nil {
+		return "", "", err
+	}
+
+	bucket = u.Host
+	object = strings.TrimPrefix(u.Path, "/")
+
+	if bucket == "" || object == "" {
+		return "", "", fmt.Errorf("invalid GCS URL format: %s", gcsURL)
+	}
+
+	return bucket, object, nil
+}
+
+// ParseAzureBlobURL parses an Azure Blob URL and returns the container and blob path.
+func ParseAzureBlobURL(azureURL string) (container, blob string, err error) {
+	if !IsAzureBlobURL(azureURL) {
+		return "", "", fmt.Errorf("not an Azure Blob URL: %s", azureURL)
+	}
+
+	u, err := url.Parse(azureURL)
+	if err != nil {
+		return "", "", err
+	}
+
+	container = u.Host
+	blob = strings.TrimPrefix(u.Path, "/")
+
+	if container == "" || blob == "" {
+		return "", "", fmt.Errorf("invalid Azure Blob URL format: %s", azureURL)
+	}
+
+	return container, blob, nil
+}
+
 // CopyFileContents copies the contents of the file named src to the file named
 // by dst. The file will be created if it does not already exist. If the
 // destination file exists, all it's contents will be replaced by the contents
 // of the source file.
-// src can be an http(s) URL or an S3 URL.
+// src can be an http(s) URL, S3 URL, GCS URL, or Azure Blob URL.
 func CopyFileContents(src, dst string, mode os.FileMode) (err error) {
 	var in io.ReadCloser
 
@@ -207,6 +263,70 @@ func CopyFileContents(src, dst string, mode os.FileMode) (err error) {
 		reader, err := b.NewReader(ctx, key, nil)
 		if err != nil {
 			return fmt.Errorf("%w: %s: %v", errS3Fetch, src, err)
+		}
+
+		in = reader
+
+	case IsGCSURL(src):
+		bucket, object, err := ParseGCSURL(src)
+		if err != nil {
+			return err
+		}
+
+		// Parse the original URL to check for query parameters
+		u, _ := url.Parse(src)
+		
+		// Build the bucket URL, preserving any query parameters from the original URL
+		bucketURL := fmt.Sprintf("gs://%s", bucket)
+		if u.RawQuery != "" {
+			bucketURL = fmt.Sprintf("%s?%s", bucketURL, u.RawQuery)
+		}
+
+		// Open bucket using gocloud.dev/blob
+		// The gcsblob driver uses Application Default Credentials
+		ctx := context.Background()
+		b, err := blob.OpenBucket(ctx, bucketURL)
+		if err != nil {
+			return fmt.Errorf("failed to open GCS bucket: %w", err)
+		}
+		defer b.Close()
+
+		// Get object from GCS
+		reader, err := b.NewReader(ctx, object, nil)
+		if err != nil {
+			return fmt.Errorf("%w: %s: %v", errGCSFetch, src, err)
+		}
+
+		in = reader
+
+	case IsAzureBlobURL(src):
+		container, blobPath, err := ParseAzureBlobURL(src)
+		if err != nil {
+			return err
+		}
+
+		// Parse the original URL to check for query parameters
+		u, _ := url.Parse(src)
+		
+		// Build the container URL, preserving any query parameters from the original URL
+		containerURL := fmt.Sprintf("azblob://%s", container)
+		if u.RawQuery != "" {
+			containerURL = fmt.Sprintf("%s?%s", containerURL, u.RawQuery)
+		}
+
+		// Open container using gocloud.dev/blob
+		// The azureblob driver uses various authentication methods
+		ctx := context.Background()
+		b, err := blob.OpenBucket(ctx, containerURL)
+		if err != nil {
+			return fmt.Errorf("failed to open Azure container: %w", err)
+		}
+		defer b.Close()
+
+		// Get blob from Azure
+		reader, err := b.NewReader(ctx, blobPath, nil)
+		if err != nil {
+			return fmt.Errorf("%w: %s: %v", errAzureFetch, src, err)
 		}
 
 		in = reader

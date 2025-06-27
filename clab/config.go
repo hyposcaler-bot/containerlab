@@ -271,8 +271,8 @@ func (c *CLab) processStartupConfig(nodeCfg *types.NodeConfig) error {
 	// embedded config is a config that is defined as a multi-line string in the topology file
 	// it contains at least one newline
 	isEmbeddedConfig := strings.Count(p, "\n") >= 1
-	// downloadable config starts with http(s):// or s3://
-	isDownloadableConfig := utils.IsHttpURL(p, false) || utils.IsS3URL(p)
+	// downloadable config starts with http(s)://, s3://, gs://, or azblob://
+	isDownloadableConfig := utils.IsHttpURL(p, false) || utils.IsS3URL(p) || utils.IsGCSURL(p) || utils.IsAzureBlobURL(p)
 
 	if isEmbeddedConfig || isDownloadableConfig {
 		switch {

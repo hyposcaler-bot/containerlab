@@ -254,3 +254,250 @@ func TestParseS3URL(t *testing.T) {
 		})
 	}
 }
+
+func TestIsGCSURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{
+			name: "Valid GCS URL",
+			url:  "gs://my-bucket/path/to/file.txt",
+			want: true,
+		},
+		{
+			name: "Valid GCS URL with subdirectories",
+			url:  "gs://bucket/dir1/dir2/file.conf",
+			want: true,
+		},
+		{
+			name: "HTTP URL should not match",
+			url:  "http://example.com/file.txt",
+			want: false,
+		},
+		{
+			name: "S3 URL should not match",
+			url:  "s3://bucket/file.txt",
+			want: false,
+		},
+		{
+			name: "Local file path should not match",
+			url:  "/home/user/file.txt",
+			want: false,
+		},
+		{
+			name: "Empty string should not match",
+			url:  "",
+			want: false,
+		},
+		{
+			name: "GS without bucket/object should match",
+			url:  "gs://",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsGCSURL(tt.url); got != tt.want {
+				t.Errorf("IsGCSURL() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsAzureBlobURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{
+			name: "Valid Azure Blob URL",
+			url:  "azblob://my-container/path/to/file.txt",
+			want: true,
+		},
+		{
+			name: "Valid Azure Blob URL with subdirectories",
+			url:  "azblob://container/dir1/dir2/file.conf",
+			want: true,
+		},
+		{
+			name: "HTTP URL should not match",
+			url:  "http://example.com/file.txt",
+			want: false,
+		},
+		{
+			name: "S3 URL should not match",
+			url:  "s3://bucket/file.txt",
+			want: false,
+		},
+		{
+			name: "GCS URL should not match",
+			url:  "gs://bucket/file.txt",
+			want: false,
+		},
+		{
+			name: "Local file path should not match",
+			url:  "/home/user/file.txt",
+			want: false,
+		},
+		{
+			name: "Empty string should not match",
+			url:  "",
+			want: false,
+		},
+		{
+			name: "Azure without container/blob should match",
+			url:  "azblob://",
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsAzureBlobURL(tt.url); got != tt.want {
+				t.Errorf("IsAzureBlobURL() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseGCSURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		gcsURL     string
+		wantBucket string
+		wantObject string
+		wantErr    bool
+	}{
+		{
+			name:       "Valid GCS URL",
+			gcsURL:     "gs://my-bucket/path/to/file.txt",
+			wantBucket: "my-bucket",
+			wantObject: "path/to/file.txt",
+			wantErr:    false,
+		},
+		{
+			name:       "Valid GCS URL with single file",
+			gcsURL:     "gs://bucket/file.conf",
+			wantBucket: "bucket",
+			wantObject: "file.conf",
+			wantErr:    false,
+		},
+		{
+			name:       "Invalid - not a GCS URL",
+			gcsURL:     "http://example.com/file.txt",
+			wantBucket: "",
+			wantObject: "",
+			wantErr:    true,
+		},
+		{
+			name:       "Invalid - missing bucket",
+			gcsURL:     "gs:///path/to/file.txt",
+			wantBucket: "",
+			wantObject: "",
+			wantErr:    true,
+		},
+		{
+			name:       "Invalid - missing object",
+			gcsURL:     "gs://bucket/",
+			wantBucket: "",
+			wantObject: "",
+			wantErr:    true,
+		},
+		{
+			name:       "Invalid - missing both bucket and object",
+			gcsURL:     "gs://",
+			wantBucket: "",
+			wantObject: "",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotBucket, gotObject, err := ParseGCSURL(tt.gcsURL)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseGCSURL() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotBucket != tt.wantBucket {
+				t.Errorf("ParseGCSURL() gotBucket = %v, want %v", gotBucket, tt.wantBucket)
+			}
+			if gotObject != tt.wantObject {
+				t.Errorf("ParseGCSURL() gotObject = %v, want %v", gotObject, tt.wantObject)
+			}
+		})
+	}
+}
+
+func TestParseAzureBlobURL(t *testing.T) {
+	tests := []struct {
+		name          string
+		azureURL      string
+		wantContainer string
+		wantBlob      string
+		wantErr       bool
+	}{
+		{
+			name:          "Valid Azure Blob URL",
+			azureURL:      "azblob://my-container/path/to/file.txt",
+			wantContainer: "my-container",
+			wantBlob:      "path/to/file.txt",
+			wantErr:       false,
+		},
+		{
+			name:          "Valid Azure Blob URL with single file",
+			azureURL:      "azblob://container/file.conf",
+			wantContainer: "container",
+			wantBlob:      "file.conf",
+			wantErr:       false,
+		},
+		{
+			name:          "Invalid - not an Azure Blob URL",
+			azureURL:      "http://example.com/file.txt",
+			wantContainer: "",
+			wantBlob:      "",
+			wantErr:       true,
+		},
+		{
+			name:          "Invalid - missing container",
+			azureURL:      "azblob:///path/to/file.txt",
+			wantContainer: "",
+			wantBlob:      "",
+			wantErr:       true,
+		},
+		{
+			name:          "Invalid - missing blob",
+			azureURL:      "azblob://container/",
+			wantContainer: "",
+			wantBlob:      "",
+			wantErr:       true,
+		},
+		{
+			name:          "Invalid - missing both container and blob",
+			azureURL:      "azblob://",
+			wantContainer: "",
+			wantBlob:      "",
+			wantErr:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotContainer, gotBlob, err := ParseAzureBlobURL(tt.azureURL)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseAzureBlobURL() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotContainer != tt.wantContainer {
+				t.Errorf("ParseAzureBlobURL() gotContainer = %v, want %v", gotContainer, tt.wantContainer)
+			}
+			if gotBlob != tt.wantBlob {
+				t.Errorf("ParseAzureBlobURL() gotBlob = %v, want %v", gotBlob, tt.wantBlob)
+			}
+		})
+	}
+}
