@@ -24,9 +24,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/steiler/acls"
+	"gocloud.dev/blob"
+	_ "gocloud.dev/blob/s3blob"
 
 	"github.com/charmbracelet/log"
 )
@@ -185,25 +185,31 @@ func CopyFileContents(src, dst string, mode os.FileMode) (err error) {
 			return err
 		}
 
-		// Load AWS config
-		cfg, err := config.LoadDefaultConfig(context.TODO())
-		if err != nil {
-			return fmt.Errorf("failed to load AWS config: %w", err)
+		// Parse the original URL to check for query parameters
+		u, _ := url.Parse(src)
+		
+		// Build the bucket URL, preserving any query parameters from the original URL
+		bucketURL := fmt.Sprintf("s3://%s", bucket)
+		if u.RawQuery != "" {
+			bucketURL = fmt.Sprintf("%s?%s", bucketURL, u.RawQuery)
 		}
 
-		// Create S3 client
-		client := s3.NewFromConfig(cfg)
+		// Open bucket using gocloud.dev/blob
+		// The s3blob driver uses the default AWS session
+		ctx := context.Background()
+		b, err := blob.OpenBucket(ctx, bucketURL)
+		if err != nil {
+			return fmt.Errorf("failed to open S3 bucket: %w", err)
+		}
+		defer b.Close()
 
 		// Get object from S3
-		result, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
-			Bucket: &bucket,
-			Key:    &key,
-		})
+		reader, err := b.NewReader(ctx, key, nil)
 		if err != nil {
 			return fmt.Errorf("%w: %s: %v", errS3Fetch, src, err)
 		}
 
-		in = result.Body
+		in = reader
 
 	default:
 		in, err = os.Open(src)

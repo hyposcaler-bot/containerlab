@@ -53,3 +53,20 @@ s3://bucket-name/path/to/file
 ```
 
 Both the bucket name and file path are required.
+
+### Specifying AWS Region
+
+You can optionally specify the AWS region directly in the URL using a query parameter:
+```
+s3://bucket-name/path/to/file?region=us-west-2
+```
+
+If no region is specified in the URL, the S3 integration will use:
+1. The default region from your AWS config file (`~/.aws/config`)
+2. The `AWS_DEFAULT_REGION` environment variable
+3. The region from instance metadata (when running on EC2)
+
+Examples:
+- `s3://my-bucket/configs/router.cli` - uses default region
+- `s3://my-bucket/configs/router.cli?region=eu-west-1` - uses eu-west-1 region
+- `s3://my-bucket/configs/router.cli?region=auto` - auto-detect region
